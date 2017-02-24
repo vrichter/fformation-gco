@@ -1,0 +1,3 @@
+[submodule "gco"]
+	path = gco
+	url = https://github.com/vrichter/gco-v3.0.git
