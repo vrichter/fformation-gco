@@ -22,7 +22,7 @@ Allowed options:
                                         May be used to override evaluation
                                         settings and default settings from
                                         settings.json
-  -d [ --dataset ] arg                  The root path of the evaluation 
+  -d [ --dataset ] arg                  The root path of the evaluation
                                         dataset. The path is expected to
                                         contain features.json, groundtruth.json
                                         and settings.json
@@ -56,6 +56,7 @@ e0123783. [doi:10.1371/journal.pone.0123783](http://dx.doi.org/10.1371/journal.p
 
 * [Boost](http://www.boost.org/ "Boost C++ Libraries") because it is boost.
 * [gco-v3.0](https://github.com/vrichter/gco-v3.0) for the graph-cuts optimization
+* [fformation](https://github.com/vrichter/fformation) for the evaluation part
 
 ## Copyright
 
