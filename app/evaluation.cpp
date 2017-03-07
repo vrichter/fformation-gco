@@ -3,6 +3,7 @@
 
 #include "GraphCutsOptimization.h"
 #include <boost/program_options.hpp>
+#include <boost/timer.hpp>
 #include <fformation/Evaluation.h>
 #include <fformation/Features.h>
 #include <fformation/GroundTruth.h>
@@ -54,7 +55,7 @@ int main(const int argc, const char **args) {
   desc.add_options()(
       "evaluation,e",
       boost::program_options::value<std::string>()->default_value(
-          "threshold=0.6666"),
+          "threshold=0.6666@modify_rotations=keep@modify_proportion=0.75@seed=0"),
       "May be used to override evaluation settings and default settings "
       "from settings.json");
   desc.add_options()(
@@ -98,4 +99,5 @@ int main(const int argc, const char **args) {
                         Options::parseFromString(
                             program_options["evaluation"].as<std::string>()));
   evaluation.printMatlabOutput(std::cout, false);
+  evaluation.printMatlabOutput(std::cout);
 }

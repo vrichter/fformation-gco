@@ -25,7 +25,7 @@ if (NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(Boost 1.54 COMPONENTS program_options REQUIRED)
-find_package(fformation REQUIRED)
+find_package(fformation 2.0 REQUIRED)
 add_subdirectory(gco)
 
 set(LIB_SRC

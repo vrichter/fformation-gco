@@ -21,13 +21,11 @@ using fformation::Timestamp;
 
 GraphCutsOptimization::GraphCutsOptimization(const fformation::Options options)
     : GroupDetector(options),
-      _mdl(options.getOption("mdl").convertValue<double>(
-          fformation::validators::MinMax<double>(
-              0., std::numeric_limits<double>::max()))),
-      _stride(options.getOption("stride").convertValue<Person::Stride>(
-          fformation::validators::MinMax<double>(
-              0., std::numeric_limits<Person::Stride>::max()))),
-      _shuffle(options.hasOption("shuffle")) {}
+      _mdl(options.getValue<double>("mdl",
+                                    fformation::validators::Min<double>(0.))),
+      _stride(options.getValue<double>(
+          "stride", fformation::validators::Min<double>(0.))),
+      _shuffle(options.getValueOr<bool>("shuffle",false)) {}
 
 GroupDetectorFactory::ConstructorFunction GraphCutsOptimization::creator() {
   return [](const Options &options) {
@@ -119,7 +117,7 @@ std::vector<T> shuffle(bool noop, std::vector<T> &src,
 
 size_t findSeed(const fformation::Options &options) {
   if (options.hasOption("seed")) {
-    return options.getOption("seed").convertValue<size_t>();
+    return options.getValue<size_t>("seed");
   } else {
     std::random_device rd;
     std::uniform_int_distribution<int> dist;
