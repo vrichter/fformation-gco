@@ -83,7 +83,10 @@ int main(const int argc, const char **args) {
   std::string features_path = path + "/features.json";
   std::string groundtruth_path = path + "/groundtruth.json";
   std::string settings_path = path + "/settings.json";
+  boost::timer timer;
   Settings settings = Settings::readMatlabJson(settings_path);
+  std::cerr << "--read settings " << timer.elapsed() << std::endl;
+  timer.restart();
 
   auto config = GroupDetectorFactory::parseConfig(
       program_options["classificator"].as<std::string>());
@@ -92,12 +95,17 @@ int main(const int argc, const char **args) {
 
   GroupDetector::Ptr detector = factory.create(config.first, config.second);
 
+  timer.restart();
   Features features = Features::readMatlabJson(features_path);
+  std::cerr << "--read features " << timer.elapsed() << std::endl;
+  timer.restart();
   GroundTruth groundtruth = GroundTruth::readMatlabJson(groundtruth_path);
+  std::cerr << "--read ground truth " << timer.elapsed() << std::endl;
 
+  timer.restart();
   Evaluation evaluation(features, groundtruth, settings, *detector.get(),
                         Options::parseFromString(
                             program_options["evaluation"].as<std::string>()));
-  evaluation.printMatlabOutput(std::cout, false);
+  std::cerr << "--evaluation " << timer.elapsed() << std::endl;
   evaluation.printMatlabOutput(std::cout);
 }

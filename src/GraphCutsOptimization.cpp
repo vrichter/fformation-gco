@@ -5,6 +5,7 @@
 #include "../gco/src/GCoptimization.h"
 #include <algorithm>
 #include <random>
+#include <iostream>
 
 using fformation::GroupDetectorFactory;
 using fformation::GroupDetector;
