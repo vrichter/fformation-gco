@@ -26,6 +26,7 @@ endif()
 
 find_package(Boost 1.54 COMPONENTS program_options REQUIRED)
 find_package(fformation 3.0 REQUIRED)
+find_package(Lua51 5.1 REQUIRED)
 add_subdirectory(gco)
 
 set(LIB_SRC
@@ -35,16 +36,36 @@ set(LIB_SRC
 
 add_library("${PROJECT_NAME}" STATIC  ${LIB_SRC})
 
+add_library("${PROJECT_NAME}_lua" SHARED ${PROJECT_SOURCE_DIR}/src/lua.cpp ${LIB_SRC}
+    "gco/src/GCoptimization.cpp"
+    "gco/src/GCoptimization.h"
+    "gco/src/LinkedBlockList.cpp"
+    "gco/src/LinkedBlockList.h"
+    "gco/src/block.h"
+    "gco/src/energy.h"
+    "gco/src/graph.h"
+  )
+
+target_link_libraries("${PROJECT_NAME}_lua"
+    ${FFORMATION_LIBRARIES}
+)
+set_property(TARGET "${PROJECT_NAME}_lua" PROPERTY INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 set(APPS
   "evaluation"
 )
 
 include_directories(
   "${PROJECT_SOURCE_DIR}/src"
-  ${FFORMATION_INCLUDE_DIRS}
+  "${FFORMATION_INCLUDE_DIRS}"
+  "${PROJECT_SOURCE_DIR}/luwra/lib"
+  "${LUA_INCLUDE_DIR}"
 )
 
-link_directories(${Boost_LIBRARY_DIRS})
+link_directories(
+  ${Boost_LIBRARY_DIRS}
+  ${LUA_LIBRARIES}
+  )
 
 foreach(EXAMPLE ${APPS})
   add_executable("${PROJECT_NAME}-${EXAMPLE}" "${PROJECT_SOURCE_DIR}/app/${EXAMPLE}.cpp")
@@ -60,3 +81,8 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/src/"
         DESTINATION "include/${PROJECT_NAME}/"
         FILES_MATCHING PATTERN "*.h" PATTERN "*.inl"
         PATTERN "matlab" EXCLUDE)
+
+install(TARGETS ${PROJECT_NAME}
+  "${PROJECT_NAME}_lua"
+  DESTINATION "lib/"
+  )
