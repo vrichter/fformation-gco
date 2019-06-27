@@ -4,8 +4,11 @@
 #include "GraphCutsOptimization.h"
 #include "../gco/src/GCoptimization.h"
 #include <algorithm>
-#include <random>
 #include <iostream>
+#include <random>
+
+//#define LOG(x) std::cerr << __FILE__ "[" << __LINE__ << "]: " << x
+#define LOG(x)
 
 using fformation::GroupDetectorFactory;
 using fformation::GroupDetector;
@@ -26,7 +29,7 @@ GraphCutsOptimization::GraphCutsOptimization(const fformation::Options options)
                                     fformation::validators::Min<double>(0.))),
       _stride(options.getValue<double>(
           "stride", fformation::validators::Min<double>(0.))),
-      _shuffle(options.getValueOr<bool>("shuffle",false)) {}
+      _shuffle(options.getValueOr<bool>("shuffle", false)) {}
 
 GroupDetectorFactory::ConstructorFunction GraphCutsOptimization::creator() {
   return [](const Options &options) {
@@ -58,12 +61,18 @@ void calculateCosts(const Person &person, const size_t person_id,
                     GCoptimizationGeneralGraph &gco) {
   for (size_t label = 0; label < group_centers.size(); ++label) {
     double cost = person.calculateDistanceCosts(group_centers[label], stride);
+    LOG("person " << person.id() << " group " << label << " dist " << cost
+                  << "\n");
     for (size_t site = 0; site < other.size(); ++site) {
-      cost += person.calculateVisibilityCost(group_centers[label], other[site]);
+      double vis_cost =
+          person.calculateVisibilityCost(group_centers[label], other[site]);
+      LOG("\tother:" << other[site].id() << " visibility " << vis_cost << "\n");
+      cost += vis_cost;
     }
     if (cost >= GCO_MAX_ENERGYTERM) {
       cost = (double)GCO_MAX_ENERGYTERM;
     }
+    LOG(std::endl);
     gco.setDataCost(person_id, label, cost);
   }
 }
