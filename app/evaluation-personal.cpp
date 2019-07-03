@@ -40,34 +40,69 @@ struct Frame {
   Classification ground_truth;
 };
 
-// returns the IdGroup of the person
-Group create_persons_group(PersonId pid, const std::vector<Group> &groups) {
+// returns the Group of the person
+Group create_persons_group(PersonId pid, const std::vector<Group> &groups,
+                           const Observation &observation) {
   for (auto g : groups) {
     if (g.persons().find(pid) != g.persons().end()) {
       return g;
     }
   }
-  return Group();
+  auto person_it = observation.group().persons().find(pid);
+  if (person_it != observation.group().persons().end()) {
+    return Group({{pid, person_it->second}});
+  } else {
+    return Group();
+  }
+}
+
+// creates a confusion matrix from condition and prediction
+ConfusionMatrix create_cm(bool condition, bool prediction) {
+  if (prediction) {
+    if (condition) {
+      return ConfusionMatrix(1, 0, 0, 0);
+    } else {
+      return ConfusionMatrix(0, 1, 0, 0);
+    }
+  } else {
+    if (condition) {
+      return ConfusionMatrix(0, 0, 0, 1);
+    } else {
+      return ConfusionMatrix(0, 0, 1, 0);
+    }
+  }
 }
 
 // creates a confusion matrix for one pid and its group participants
 ConfusionMatrix
 calculate_persons_cm(const PersonId &pid,
                      const std::vector<Person> &persons_in_frame,
-                     const Group &cl, const Group &an) {
+                     const std::set<PersonId> &missing_persons, const Group &cl,
+                     const Group &an) {
   ConfusionMatrix::IntType tp = 0;
   ConfusionMatrix::IntType fp = 0;
   ConfusionMatrix::IntType tn = 0;
   ConfusionMatrix::IntType fn = 0;
   for (auto person : persons_in_frame) {
-    // if (person.id() != pid) {
-    bool in_cl = cl.persons().find(person.id()) != cl.persons().end();
-    bool in_an = an.persons().find(person.id()) != an.persons().end();
-    tp += (in_cl & in_an) ? 1 : 0;
-    fp += (in_cl & !in_an) ? 1 : 0;
-    tn += (!in_cl & !in_an) ? 1 : 0;
-    fn += (!in_cl & in_an) ? 1 : 0;
-    //}
+    if (person.id() != pid) {
+      bool in_cl = cl.persons().find(person.id()) != cl.persons().end();
+      bool in_an = an.persons().find(person.id()) != an.persons().end();
+      tp += (in_cl & in_an) ? 1 : 0;
+      fp += (in_cl & !in_an) ? 1 : 0;
+      tn += (!in_cl & !in_an) ? 1 : 0;
+      fn += (!in_cl & in_an) ? 1 : 0;
+    } else {
+    }
+  }
+  for (auto pid : missing_persons) {
+    if (an.persons().find(pid) != an.persons().end()) {
+      // person in group but not detected
+      ++fn;
+    } else {
+      // person not in group and not detected -- it should be okay to ignore
+      // them
+      ++tn;
+    }
   }
   return ConfusionMatrix(tp, fp, tn, fn);
 }
@@ -105,47 +140,21 @@ std::vector<Group> generate_group_lists(const Classification &cl,
   return result;
 }
 
-// counts the persons that are in ground truth but not in observation
-size_t count_missing_persons(const PersonId &pid, const Classification &gt,
-                             const Observation &ob) {
-  size_t result = 0;
+// get persons that are missing in the observation but found in classification
+//    this can happen when the observation
+//    is produced by a detection that oversees a person
+std::set<PersonId> get_missing_persons(const Classification &gt,
+                                       const Observation &ob) {
+  std::set<PersonId> result;
   for (auto idg : gt.idGroups()) {
-    if (idg.has_person(pid)) {
-      for (auto group_participant_id : idg.persons()) {
-        if (!ob.group().has_person(group_participant_id)) {
-          ++result;
-        }
+    for (auto group_participant_id : idg.persons()) {
+      if (!ob.group().has_person(group_participant_id)) {
+        result.insert(group_participant_id);
       }
     }
   }
   return result;
 }
-
-struct Evaluation {
-  struct Line {
-    size_t group_size;
-    size_t detected_group_size;
-    size_t missing_members;
-  };
-
-  std::map<PersonId, Line> results;
-  Evaluation(const Classification &gt, const Classification &cl,
-             const Observation &obs, const std::set<PersonId> &ids) {
-    const auto person_list = obs.group().generatePersonList();
-    const auto gt_groups = generate_group_lists(gt, obs);
-    const auto cl_groups = generate_group_lists(cl, obs);
-    for (auto pid : ids) {
-      const Group &gt_group = create_persons_group(pid, gt_groups);
-      const size_t missing = count_missing_persons(pid, gt, obs);
-      const Group &cl_group = create_persons_group(pid, cl_groups);
-      Line l;
-      l.group_size = gt_group.persons().size();
-      l.detected_group_size = cl_group.persons().size();
-      l.missing_members = missing;
-      results[pid] = l;
-    }
-  }
-};
 
 struct FrameResult {
   Frame frame;
@@ -216,7 +225,7 @@ public:
                   << std::endl;
         continue;
       }
-      frames_annotated.push_back({t, d_it->second, cl});
+      frames_annotated.push_back({t, a_it->second, cl});
       frames_detected.push_back({t, d_it->second, cl});
     }
     std::cerr << "  --create frames " << timer.elapsed() << std::endl;
@@ -274,31 +283,23 @@ struct Statistics {
   ConfusionMatrix in_group;
 };
 
-ConfusionMatrix create_cm(bool condition, bool prediction) {
-  if (prediction) {
-    if (condition) {
-      return ConfusionMatrix(1, 0, 0, 0);
-    } else {
-      return ConfusionMatrix(0, 1, 0, 0);
-    }
-  } else {
-    if (condition) {
-      return ConfusionMatrix(0, 0, 0, 1);
-    } else {
-      return ConfusionMatrix(0, 0, 1, 0);
-    }
+void print_na(size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    std::cout << "NA\t";
   }
 }
+template <typename T> void print(const T t) { std::cout << t << "\t"; }
 
 std::map<PersonId, Statistics>
 calculate_statistics(const std::vector<FrameResult> &results,
-                     const std::set<PersonId> &ids) {
+                     const std::set<PersonId> &ids, const Result &r) {
   std::map<PersonId, Statistics> result;
   for (auto frame_result : results) {
     auto &obs = frame_result.frame.features;
     auto &gt = frame_result.frame.ground_truth;
     auto &cl = frame_result.classification;
     const auto person_list = obs.group().generatePersonList();
+    const auto missing_persons = get_missing_persons(gt, obs);
     const auto gt_groups = generate_group_lists(gt, obs);
     const auto cl_groups = generate_group_lists(cl, obs);
     auto local_ids = ids;
@@ -309,22 +310,70 @@ calculate_statistics(const std::vector<FrameResult> &results,
     }
     for (auto id : local_ids) {
       auto &stat = result[id];
-      auto gt_group_person = create_persons_group(id, gt_groups);
-      auto cl_group_person = create_persons_group(id, cl_groups);
+      auto gt_group_person = create_persons_group(id, gt_groups, obs);
+      auto cl_group_person = create_persons_group(id, cl_groups, obs);
+      // create statistics (in/out of group cm) for outer printer
       stat.in_group =
           stat.in_group + create_cm(gt_group_person.persons().size() > 1,
                                     cl_group_person.persons().size() > 1);
+      // inner printer
+      print("personal-test");
+      print(frame_result.frame.time);
+      print(r.alg);
+      print(r.mdl);
+      print(r.stride);
+      print(r.frame_type);
+      print(id);
+      print(gt_group_person.persons().size());
+      print(cl_group_person.persons().size());
+      print(missing_persons.size());
+      if (obs.group().persons().find(id) == obs.group().persons().end()) {
+        print_na(22);
+      } else {
+        auto person = obs.group().persons().at(id);
+        // calculate match with persons own group
+        auto cm = calculate_persons_cm(id, person_list, missing_persons,
+                                       cl_group_person, gt_group_person);
+        // print cm
+        print(cm.true_positive());
+        print(cm.false_positive());
+        print(cm.true_negative());
+        print(cm.false_negative());
+        print(cm.condition_positive());
+        print(cm.condition_negative());
+        print(cm.predicted_positive());
+        print(cm.predicted_negative());
+        // precision recall ..
+        print(cm.calculatePrecision());
+        print(cm.calculateRecall());
+        print(cm.calculateF1Score());
+        print(cm.calculateMarkedness());
+        print(cm.calculateInformedness());
+        print(cm.false_positive() / double(cm.condition_negative()));
+        // group centers and costs
+        auto gc = gt_group_person.calculateCenter(r.stride);
+        print(gc.x());
+        print(gc.y());
+        print(gt_group_person.calculateDistanceCosts(r.stride));
+        print(person.calculateDistanceCosts(gc, r.stride));
+        auto cc = cl_group_person.calculateCenter(r.stride);
+        print(cc.x());
+        print(cc.y());
+        print(cl_group_person.calculateDistanceCosts(r.stride));
+        print(person.calculateDistanceCosts(cc, r.stride));
+      }
+      std::cout << "\n";
+      ;
     }
   }
   return result;
 }
 
-template <typename T> void print(const T t) { std::cout << t << "\t"; }
-
 void print_results(const Result &r, const std::set<PersonId> &ids) {
-  auto stats = calculate_statistics(r.frames, ids);
+  auto stats = calculate_statistics(r.frames, ids, r);
   for (auto stat_it : stats) {
     auto &stat = stat_it.second;
+    print("ingroup-test");
     print(r.alg);
     print(r.mdl);
     print(r.stride);
@@ -333,6 +382,8 @@ void print_results(const Result &r, const std::set<PersonId> &ids) {
     print(stat.in_group.calculatePrecision());
     print(stat.in_group.calculateRecall());
     print(stat.in_group.calculateF1Score());
+    print(stat.in_group.calculateMarkedness());
+    print(stat.in_group.calculateInformedness());
     std::cout << std::endl;
   }
 }
