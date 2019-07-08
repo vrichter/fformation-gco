@@ -1,3 +1,6 @@
 [submodule "gco"]
 	path = gco
 	url = https://github.com/vrichter/gco-v3.0.git
+[submodule "luwra"]
+	path = luwra
+	url = https://github.com/vapourismo/luwra.git
