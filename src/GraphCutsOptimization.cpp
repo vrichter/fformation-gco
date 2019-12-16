@@ -7,8 +7,33 @@
 #include <iostream>
 #include <random>
 
-//#define LOG(x) std::cerr << __FILE__ "[" << __LINE__ << "]: " << x
+//#define PRINT_CALCULATIONS
+
+#ifdef PRINT_CALCULATIONS
 #define LOG(x)
+#else
+#define LOG(x) std::cerr << __FILE__ "[" << __LINE__ << "]: " << x
+#endif
+
+#ifdef PRINT_CALCULATIONS
+#define LOG_COSTS(x, y, old_sum, new_sum, classification)                      \
+  LOG(x << ": ts: " << observation.timestamp() << " iteration: " << count      \
+        << " old cost: " << old_sum << " current cost: " << new_sum << "\n");  \
+  for (auto g : classification.createGroups(observation, true)) {              \
+    auto center = g.calculateCenter(_stride);                                  \
+    LOG("    - " << g.calculateDistanceCosts(_stride) << "\n");                \
+    for (auto p : g.persons()) {                                               \
+      auto cost = p.second.calculateDistanceCosts(center, _stride);            \
+      LOG("        - " << p.first << " - " << cost) << "\n";                   \
+      if (cost > _mdl && y) {                                                  \
+        LOG("single cost higher than mdl\n");                                  \
+      }                                                                        \
+    }                                                                          \
+  }                                                                            \
+  LOG(std::endl);
+#else
+#define LOG_COSTS(x, y, old_sum, new_sum, classification)
+#endif
 
 using fformation::GroupDetectorFactory;
 using fformation::GroupDetector;
@@ -61,18 +86,14 @@ void calculateCosts(const Person &person, const size_t person_id,
                     GCoptimizationGeneralGraph &gco) {
   for (size_t label = 0; label < group_centers.size(); ++label) {
     double cost = person.calculateDistanceCosts(group_centers[label], stride);
-    LOG("person " << person.id() << " group " << label << " dist " << cost
-                  << "\n");
     for (size_t site = 0; site < other.size(); ++site) {
       double vis_cost =
           person.calculateVisibilityCost(group_centers[label], other[site]);
-      LOG("\tother:" << other[site].id() << " visibility " << vis_cost << "\n");
       cost += vis_cost;
     }
     if (cost >= GCO_MAX_ENERGYTERM) {
       cost = (double)GCO_MAX_ENERGYTERM;
     }
-    LOG(std::endl);
     gco.setDataCost(person_id, label, cost);
   }
 }
@@ -151,14 +172,24 @@ GraphCutsOptimization::detect(const Observation &observation) const {
     persons.push_back(person.second);
   }
   shuffle(_shuffle, persons, rng);
+  size_t count = 0;
   do {
+    ++count;
     std::vector<Position2D> group_centers =
         updateGroupCenters(observation, classification, _stride);
     shuffle(_shuffle, group_centers, rng);
-    classification =
-        updateAssignment(persons, group_centers, observation.timestamp());
+    if (group_centers.size() < 2) {
+      // in if there is only one remaining proposed center, the algoritm can not
+      // be performed (and does not need to)
+      classification = Classification(observation.timestamp(),
+                                      {{observation.group().generatIdGroup()}});
+    } else {
+      classification =
+          updateAssignment(persons, group_centers, observation.timestamp());
+    }
+    LOG_COSTS("GCO", false, old_cost, current_cost, classification);
     old_cost = current_cost;
     current_cost = classification.calculateCosts(observation, _stride, _mdl);
-  } while (current_cost < old_cost && classification.idGroups().size() > 1);
+  } while (current_cost < old_cost);
   return classification;
 }
