@@ -84,15 +84,15 @@ calculate_persons_cm(const PersonId &pid,
   ConfusionMatrix::IntType tn = 0;
   ConfusionMatrix::IntType fn = 0;
   for (auto person : persons_in_frame) {
-    if (person.id() != pid) {
-      bool in_cl = cl.persons().find(person.id()) != cl.persons().end();
-      bool in_an = an.persons().find(person.id()) != an.persons().end();
-      tp += (in_cl & in_an) ? 1 : 0;
-      fp += (in_cl & !in_an) ? 1 : 0;
-      tn += (!in_cl & !in_an) ? 1 : 0;
-      fn += (!in_cl & in_an) ? 1 : 0;
-    } else {
-    }
+    // if (person.id() != pid) {
+    bool in_cl = cl.persons().find(person.id()) != cl.persons().end();
+    bool in_an = an.persons().find(person.id()) != an.persons().end();
+    tp += (in_cl & in_an) ? 1 : 0;
+    fp += (in_cl & !in_an) ? 1 : 0;
+    tn += (!in_cl & !in_an) ? 1 : 0;
+    fn += (!in_cl & in_an) ? 1 : 0;
+    //} else {
+    //}
   }
   for (auto pid : missing_persons) {
     if (an.persons().find(pid) != an.persons().end()) {
@@ -105,6 +105,58 @@ calculate_persons_cm(const PersonId &pid,
     }
   }
   return ConfusionMatrix(tp, fp, tn, fn);
+}
+
+// create tolerant confusion matrix according to Setti2015
+ConfusionMatrix create_tolerant_cm(const Group &gt, const Group &cl, double T) {
+  bool gt_in_group = gt.persons().size() > 1;
+  bool cl_in_group = cl.persons().size() > 1;
+  if (!gt_in_group && cl_in_group) {
+    return ConfusionMatrix(0, 1, 0, 0);
+  }
+  if (!gt_in_group && !cl_in_group) {
+    return ConfusionMatrix(0, 0, 1, 0);
+  }
+  double true_members = 0.;
+  double false_members = 0.;
+  double cardinality = double(gt.persons().size());
+  for (auto person : cl.persons()) {
+    if (gt.has_person(person.first)) {
+      true_members += 1.;
+    } else {
+      false_members += 1.;
+    }
+  }
+  true_members /= cardinality;
+  false_members /= cardinality;
+  bool tolerant_match = (true_members >= T) && ((1 - false_members) >= T);
+  if (gt_in_group && cl_in_group && tolerant_match) {
+    return ConfusionMatrix(1, 0, 0, 0);
+  }
+  if ((gt_in_group && !cl_in_group) ||
+      (gt_in_group && cl_in_group && !tolerant_match)) {
+    return ConfusionMatrix(0, 0, 0, 1);
+  }
+  throw fformation::Exception("This should not have happaned.");
+}
+
+double calculate_person_visibility(const Person &person,
+                                   const Position2D &center,
+                                   std::vector<Person> persons) {
+  double result = 0.;
+  for (auto p : persons) {
+    result += person.calculateVisibilityCost(center, p);
+  }
+  return result;
+}
+
+double calculate_group_visibility(const Group &g, const Position2D &center,
+                                  std::vector<Person> persons) {
+  double result = 0.;
+  for (auto person : g.persons()) {
+    result += calculate_person_visibility(person.second, center, persons);
+  }
+  return result;
 }
 
 // create groups while ignoring persons missing from observation
@@ -183,7 +235,8 @@ class DataSet {
   std::map<std::string, Frames> _frames;
 
 public:
-  DataSet(std::string &af, std::string &df, std::string &gt) {
+  DataSet(std::string &af, std::string &df, std::string &gt,
+          Timestamp skip_before, Timestamp skip_after) {
     boost::timer timer;
     timer.restart();
     Features annotated_features = Features::readMatlabJson(af);
@@ -202,16 +255,28 @@ public:
     std::cerr << "  --create annotation map " << timer.elapsed() << std::endl;
     timer.restart();
     std::map<Timestamp, Observation> detection_map;
+    size_t skipped = 0;
     for (auto d : detected_features.observations()) {
+      if ((d.timestamp() < skip_before) || (d.timestamp() > skip_after)) {
+        ++skipped;
+        continue;
+      }
       detection_map[d.timestamp()] = d;
     }
+    std::cerr << "    -- skipped " << skipped
+              << " observations from detected features" << std::endl;
     std::cerr << "  --create detection map " << timer.elapsed() << std::endl;
     timer.restart();
     Frames &frames_annotated = _frames["annotated"];
     Frames &frames_detected = _frames["detected"];
     frames_annotated.reserve(groundtruth.classifications().size());
     frames_detected.reserve(groundtruth.classifications().size());
+    skipped = 0;
     for (auto cl : groundtruth.classifications()) {
+      if (cl.timestamp() < skip_before || cl.timestamp() > skip_after) {
+        ++skipped;
+        continue;
+      }
       auto t = cl.timestamp();
       auto a_it = annotation_map.find(t);
       auto d_it = detection_map.find(t);
@@ -228,6 +293,8 @@ public:
       frames_annotated.push_back({t, a_it->second, cl});
       frames_detected.push_back({t, d_it->second, cl});
     }
+    std::cerr << "    -- skipped " << skipped
+              << " observations from ground truth" << std::endl;
     std::cerr << "  --create frames " << timer.elapsed() << std::endl;
     timer.restart();
     std::sort(frames_annotated.begin(), frames_annotated.end(),
@@ -281,6 +348,8 @@ std::vector<DetectorConfig> setup_detectors(Json &settings) {
 
 struct Statistics {
   ConfusionMatrix in_group;
+  ConfusionMatrix tolerant_match_2_3;
+  ConfusionMatrix tolerant_match_1;
 };
 
 void print_na(size_t n) {
@@ -312,10 +381,16 @@ calculate_statistics(const std::vector<FrameResult> &results,
       auto &stat = result[id];
       auto gt_group_person = create_persons_group(id, gt_groups, obs);
       auto cl_group_person = create_persons_group(id, cl_groups, obs);
+      bool gt_in_group = gt_group_person.persons().size() > 1;
+      bool cl_in_group = cl_group_person.persons().size() > 1;
       // create statistics (in/out of group cm) for outer printer
-      stat.in_group =
-          stat.in_group + create_cm(gt_group_person.persons().size() > 1,
-                                    cl_group_person.persons().size() > 1);
+      stat.in_group = stat.in_group + create_cm(gt_in_group, cl_in_group);
+      stat.tolerant_match_2_3 =
+          stat.tolerant_match_2_3 +
+          create_tolerant_cm(gt_group_person, cl_group_person, 2. / 3.);
+      stat.tolerant_match_1 =
+          stat.tolerant_match_1 +
+          create_tolerant_cm(gt_group_person, cl_group_person, 1.);
       // inner printer
       print("personal-test");
       print(frame_result.frame.time);
@@ -328,7 +403,7 @@ calculate_statistics(const std::vector<FrameResult> &results,
       print(cl_group_person.persons().size());
       print(missing_persons.size());
       if (obs.group().persons().find(id) == obs.group().persons().end()) {
-        print_na(22);
+        print_na(26);
       } else {
         auto person = obs.group().persons().at(id);
         // calculate match with persons own group
@@ -356,11 +431,15 @@ calculate_statistics(const std::vector<FrameResult> &results,
         print(gc.y());
         print(gt_group_person.calculateDistanceCosts(r.stride));
         print(person.calculateDistanceCosts(gc, r.stride));
+        print(calculate_group_visibility(gt_group_person, gc, person_list));
+        print(calculate_person_visibility(person, gc, person_list));
         auto cc = cl_group_person.calculateCenter(r.stride);
         print(cc.x());
         print(cc.y());
         print(cl_group_person.calculateDistanceCosts(r.stride));
         print(person.calculateDistanceCosts(cc, r.stride));
+        print(calculate_group_visibility(cl_group_person, cc, person_list));
+        print(calculate_person_visibility(person, cc, person_list));
       }
       std::cout << "\n";
       ;
@@ -384,6 +463,16 @@ void print_results(const Result &r, const std::set<PersonId> &ids) {
     print(stat.in_group.calculateF1Score());
     print(stat.in_group.calculateMarkedness());
     print(stat.in_group.calculateInformedness());
+    print(stat.tolerant_match_2_3.calculatePrecision());
+    print(stat.tolerant_match_2_3.calculateRecall());
+    print(stat.tolerant_match_2_3.calculateF1Score());
+    print(stat.tolerant_match_2_3.calculateMarkedness());
+    print(stat.tolerant_match_2_3.calculateInformedness());
+    print(stat.tolerant_match_1.calculatePrecision());
+    print(stat.tolerant_match_1.calculateRecall());
+    print(stat.tolerant_match_1.calculateF1Score());
+    print(stat.tolerant_match_1.calculateMarkedness());
+    print(stat.tolerant_match_1.calculateInformedness());
     std::cout << std::endl;
   }
 }
@@ -493,7 +582,11 @@ int main(const int argc, const char **args) {
             << timer.elapsed() << std::endl;
   timer.restart();
 
-  DataSet data(features_path1, features_path2, groundtruth_path);
+  Timestamp skip_before = settings.value("skip-before", 0);
+  Timestamp skip_after = settings.value(
+      "skip-after", std::numeric_limits<Timestamp::TimestampType>::max());
+  DataSet data(features_path1, features_path2, groundtruth_path, skip_before,
+               skip_after);
   std::cerr << "--read datasets " << timer.elapsed() << std::endl;
   timer.restart();
 
