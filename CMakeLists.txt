@@ -52,7 +52,7 @@ install(EXPORT ${PROJECT_NAME}-export
 
 
 if(${BUILD_LUA_BINDING})
-    find_package(Lua51 5.1 REQUIRED)
+    find_package(Lua 5.1 REQUIRED)
     add_library("${PROJECT_NAME}_lua" SHARED
       ${PROJECT_SOURCE_DIR}/src/lua.cpp
       ${LIB_SRC} ${GCO_SRC}
